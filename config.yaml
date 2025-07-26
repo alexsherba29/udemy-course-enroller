@@ -3,14 +3,14 @@ telegram:
   channel_id: ""  # Target channel for posting courses
 
 scraping:
-  interval_minutes: 30
+  interval_minutes: 5
   source_urls:
     - "https://courson.xyz/"
   user_agent: "Course Notifier Bot 1.0"
   rate_limit_delay_seconds: 2
 
 database:
-  path: "./courses.db"
+  path: "courses.db"
 
 filters:
   default_categories:
@@ -22,4 +22,4 @@ filters:
 
 logging:
   level: "info"
-  file: "./bot.log"
+  file: "bot.log"

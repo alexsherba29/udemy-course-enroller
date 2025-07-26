@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -18,6 +19,7 @@ var (
 	allowedDomains = []string{
 		"udemy.com",
 		"www.udemy.com",
+		"courson.xyz",
 	}
 	
 	// Regex for basic input sanitization
@@ -113,8 +115,12 @@ func ValidateChannelID(channelID string) error {
 	}
 
 	// Basic validation for Telegram channel ID format
+	// Allow @username, -chatid, or numeric user IDs
 	if !strings.HasPrefix(channelID, "@") && !strings.HasPrefix(channelID, "-") {
-		return fmt.Errorf("invalid channel ID format")
+		// Check if it's a numeric user ID
+		if _, err := strconv.ParseInt(channelID, 10, 64); err != nil {
+			return fmt.Errorf("invalid channel ID format")
+		}
 	}
 
 	return nil

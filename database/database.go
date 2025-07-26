@@ -199,6 +199,10 @@ func (db *DB) QueryRow(query string, args ...interface{}) *sql.Row {
 	return db.conn.QueryRow(query, args...)
 }
 
+func (db *DB) Query(query string, args ...interface{}) (*sql.Rows, error) {
+	return db.conn.Query(query, args...)
+}
+
 func (db *DB) Close() error {
 	return db.conn.Close()
 }

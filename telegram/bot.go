@@ -403,9 +403,34 @@ func (b *Bot) sendMessage(chatID int64, text string) {
 }
 
 func (b *Bot) getUserWishlist(userID int64) ([]database.Course, error) {
-	// For now, return empty slice - this would need proper implementation with Query method
-	return []database.Course{}, nil
+	query := `SELECT c.id, c.url, c.title, c.description, c.category, c.rating, c.price, c.discount, c.expires_at, c.posted_at 
+			  FROM courses c
+			  INNER JOIN wishlist w ON c.id = w.course_id
+			  WHERE w.user_id = ?
+			  ORDER BY w.added_at DESC`
+	
+	rows, err := b.db.Query(query, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query wishlist: %w", err)
+	}
+	defer rows.Close()
+	
+	var courses []database.Course
+	for rows.Next() {
+		var course database.Course
+		err := rows.Scan(&course.ID, &course.URL, &course.Title, &course.Description,
+			&course.Category, &course.Rating, &course.Price, &course.Discount,
+			&course.ExpiresAt, &course.PostedAt)
+		if err != nil {
+			log.Printf("Failed to scan course: %v", err)
+			continue
+		}
+		courses = append(courses, course)
+	}
+	
+	return courses, nil
 }
+
 
 func (b *Bot) getWishlistCount(userID int64) (int, error) {
 	var count int
