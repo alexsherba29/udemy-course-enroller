@@ -1,0 +1,25 @@
+telegram:
+  token: ""  # Set via TELEGRAM_BOT_TOKEN environment variable
+  channel_id: ""  # Target channel for posting courses
+
+scraping:
+  interval_minutes: 30
+  source_urls:
+    - "https://courson.xyz/"
+  user_agent: "Course Notifier Bot 1.0"
+  rate_limit_delay_seconds: 2
+
+database:
+  path: "./courses.db"
+
+filters:
+  default_categories:
+    - "Development"
+    - "Business"
+    - "IT & Software"
+  min_rating: 4.0
+  max_courses_per_hour: 10
+
+logging:
+  level: "info"
+  file: "./bot.log"
