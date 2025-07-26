@@ -117,8 +117,11 @@ func (s *Scraper) extractCourses(doc *goquery.Document, sourceURL string) ([]dat
 			return
 		}
 
-		// Sanitize title
+		// Sanitize and validate title length
 		title = security.SanitizeString(title)
+		if len(title) > 200 { // Reasonable title length limit
+			title = title[:200]
+		}
 
 		// Extract basic course info
 		course := database.Course{
