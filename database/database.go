@@ -13,16 +13,18 @@ type DB struct {
 }
 
 type Course struct {
-	ID          int       `json:"id"`
-	URL         string    `json:"url"`
-	Title       string    `json:"title"`
-	Description string    `json:"description"`
-	Category    string    `json:"category"`
-	Rating      float64   `json:"rating"`
-	Price       string    `json:"price"`
-	Discount    string    `json:"discount"`
-	ExpiresAt   time.Time `json:"expires_at"`
-	PostedAt    time.Time `json:"posted_at"`
+	ID           int       `json:"id"`
+	URL          string    `json:"url"`
+	Title        string    `json:"title"`
+	Description  string    `json:"description"`
+	Category     string    `json:"category"`
+	Rating       float64   `json:"rating"`
+	Price        string    `json:"price"`
+	Discount     string    `json:"discount"`
+	ExpiresAt    time.Time `json:"expires_at"`
+	PostedAt     time.Time `json:"posted_at"`
+	QualityScore float64   `json:"quality_score"`
+	StudentCount int       `json:"student_count"`
 }
 
 type UserPreference struct {
@@ -67,7 +69,9 @@ func (db *DB) createTables() error {
 			price TEXT,
 			discount TEXT,
 			expires_at DATETIME,
-			posted_at DATETIME DEFAULT CURRENT_TIMESTAMP
+			posted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			quality_score REAL DEFAULT 0,
+			student_count INTEGER DEFAULT 0
 		)`,
 		
 		`CREATE TABLE IF NOT EXISTS user_preferences (
@@ -107,11 +111,12 @@ func (db *DB) createTables() error {
 }
 
 func (db *DB) AddCourse(course *Course) error {
-	query := `INSERT INTO courses (url, title, description, category, rating, price, discount, expires_at) 
-			  VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+	query := `INSERT INTO courses (url, title, description, category, rating, price, discount, expires_at, quality_score, student_count) 
+			  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 	
 	result, err := db.conn.Exec(query, course.URL, course.Title, course.Description, 
-		course.Category, course.Rating, course.Price, course.Discount, course.ExpiresAt)
+		course.Category, course.Rating, course.Price, course.Discount, course.ExpiresAt,
+		course.QualityScore, course.StudentCount)
 	if err != nil {
 		return fmt.Errorf("failed to insert course: %w", err)
 	}
@@ -142,7 +147,7 @@ func (db *DB) CleanupOldCourses(daysOld int) error {
 }
 
 func (db *DB) GetRecentCourses(limit int) ([]Course, error) {
-	query := `SELECT id, url, title, description, category, rating, price, discount, expires_at, posted_at 
+	query := `SELECT id, url, title, description, category, rating, price, discount, expires_at, posted_at, quality_score, student_count 
 			  FROM courses ORDER BY posted_at DESC LIMIT ?`
 	
 	rows, err := db.conn.Query(query, limit)
@@ -156,7 +161,7 @@ func (db *DB) GetRecentCourses(limit int) ([]Course, error) {
 		var course Course
 		err := rows.Scan(&course.ID, &course.URL, &course.Title, &course.Description,
 			&course.Category, &course.Rating, &course.Price, &course.Discount,
-			&course.ExpiresAt, &course.PostedAt)
+			&course.ExpiresAt, &course.PostedAt, &course.QualityScore, &course.StudentCount)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan course: %w", err)
 		}
@@ -171,6 +176,15 @@ func (db *DB) AddToWishlist(userID int64, courseID int) error {
 	_, err := db.conn.Exec(query, userID, courseID)
 	if err != nil {
 		return fmt.Errorf("failed to add to wishlist: %w", err)
+	}
+	return nil
+}
+
+func (db *DB) RemoveFromWishlist(userID int64, courseID int) error {
+	query := `DELETE FROM wishlist WHERE user_id = ? AND course_id = ?`
+	_, err := db.conn.Exec(query, userID, courseID)
+	if err != nil {
+		return fmt.Errorf("failed to remove from wishlist: %w", err)
 	}
 	return nil
 }

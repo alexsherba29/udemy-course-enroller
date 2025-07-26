@@ -134,6 +134,21 @@ func (b *Bot) handleCallbackQuery(callback *tgbotapi.CallbackQuery) {
 		)
 		edit.ParseMode = "Markdown"
 		b.api.Send(edit)
+
+	case "remove_wishlist":
+		if err := b.db.RemoveFromWishlist(userID, courseID); err != nil {
+			log.Printf("Failed to remove from wishlist: %v", err)
+			return
+		}
+		
+		// Edit message to show it's been removed from wishlist
+		edit := tgbotapi.NewEditMessageText(
+			callback.Message.Chat.ID,
+			callback.Message.MessageID,
+			callback.Message.Text+"\n\n🗑️ *Removed from wishlist*",
+		)
+		edit.ParseMode = "Markdown"
+		b.api.Send(edit)
 	}
 
 	// Answer callback query to remove loading state
@@ -282,22 +297,38 @@ You can add courses to your wishlist by clicking the ⭐ button on course notifi
 		return
 	}
 
-	text := fmt.Sprintf("⭐ *Your Wishlist* (%d courses)\n\n", len(wishlist))
-	
-	for i, course := range wishlist {
-		if i >= 10 { // Limit to first 10 courses
-			text += fmt.Sprintf("... and %d more courses", len(wishlist)-10)
-			break
-		}
-		
-		text += fmt.Sprintf("🎓 *%s*\n📂 %s | ⭐ %.1f\n🔗 %s\n\n",
-			course.Title, course.Category, course.Rating, course.URL)
+	// Send courses with remove buttons (limit to 5 at a time due to message length)
+	coursesToShow := len(wishlist)
+	if coursesToShow > 5 {
+		coursesToShow = 5
 	}
-
-	msg := tgbotapi.NewMessage(message.Chat.ID, text)
-	msg.ParseMode = "Markdown"
-	msg.DisableWebPagePreview = true
-	b.api.Send(msg)
+	
+	for i := 0; i < coursesToShow; i++ {
+		course := wishlist[i]
+		courseText := fmt.Sprintf("🎓 *%s*\n📂 %s | ⭐ %.1f\n🔗 %s",
+			course.Title, course.Category, course.Rating, course.URL)
+		
+		// Create remove button for each course
+		keyboard := tgbotapi.NewInlineKeyboardMarkup(
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("🗑️ Remove from Wishlist", fmt.Sprintf("remove_wishlist:%d", course.ID)),
+				tgbotapi.NewInlineKeyboardButtonURL("🔗 View Course", course.URL),
+			),
+		)
+		
+		msg := tgbotapi.NewMessage(message.Chat.ID, courseText)
+		msg.ParseMode = "Markdown"
+		msg.ReplyMarkup = keyboard
+		msg.DisableWebPagePreview = true
+		b.api.Send(msg)
+	}
+	
+	// If there are more courses, show summary
+	if len(wishlist) > 5 {
+		summaryText := fmt.Sprintf("\n... and %d more courses in your wishlist.\nUse /wishlist again to see more.", len(wishlist)-5)
+		summaryMsg := tgbotapi.NewMessage(message.Chat.ID, summaryText)
+		b.api.Send(summaryMsg)
+	}
 }
 
 func (b *Bot) handleStatsCommand(message *tgbotapi.Message) {
@@ -364,12 +395,35 @@ func (b *Bot) PostCourse(course *database.Course) error {
 func (b *Bot) formatCourseMessage(course *database.Course) string {
 	expiresIn := time.Until(course.ExpiresAt)
 	expiry := "Unknown"
+	urgencyIcon := "🕒"
+	
 	if expiresIn > 0 {
-		if expiresIn.Hours() < 24 {
-			expiry = fmt.Sprintf("%.0f hours", expiresIn.Hours())
+		hours := expiresIn.Hours()
+		if hours < 6 {
+			expiry = fmt.Sprintf("%.0f hours", hours)
+			urgencyIcon = "🚨" // Very urgent
+		} else if hours < 24 {
+			expiry = fmt.Sprintf("%.0f hours", hours)
+			urgencyIcon = "⚡" // Urgent
 		} else {
-			expiry = fmt.Sprintf("%.0f days", expiresIn.Hours()/24)
+			days := hours / 24
+			expiry = fmt.Sprintf("%.0f days", days)
+			if days <= 3 {
+				urgencyIcon = "⏰" // Somewhat urgent
+			} else {
+				urgencyIcon = "🕒" // Normal
+			}
 		}
+	}
+
+	// Quality score indicator
+	qualityIcon := "🔴" // Low quality
+	if course.QualityScore >= 80 {
+		qualityIcon = "🟢" // High quality
+	} else if course.QualityScore >= 60 {
+		qualityIcon = "🟡" // Medium quality
+	} else if course.QualityScore >= 40 {
+		qualityIcon = "🟠" // Fair quality
 	}
 
 	rating := ""
@@ -377,20 +431,34 @@ func (b *Bot) formatCourseMessage(course *database.Course) string {
 		rating = fmt.Sprintf("⭐ %.1f", course.Rating)
 	}
 
+	students := ""
+	if course.StudentCount > 0 {
+		if course.StudentCount >= 1000 {
+			students = fmt.Sprintf("👥 %dk students", course.StudentCount/1000)
+		} else {
+			students = fmt.Sprintf("👥 %d students", course.StudentCount)
+		}
+	}
+
 	text := fmt.Sprintf(`🎓 *%s*
 
 📂 Category: %s
 💰 Price: %s %s
-⏰ Expires in: %s
-%s
+%s Expires in: %s
+%s Quality Score: %.0f/100
+%s %s
 
 %s`,
 		course.Title,
 		course.Category,
 		course.Price,
 		course.Discount,
+		urgencyIcon,
 		expiry,
+		qualityIcon,
+		course.QualityScore,
 		rating,
+		students,
 		course.Description,
 	)
 
@@ -403,7 +471,7 @@ func (b *Bot) sendMessage(chatID int64, text string) {
 }
 
 func (b *Bot) getUserWishlist(userID int64) ([]database.Course, error) {
-	query := `SELECT c.id, c.url, c.title, c.description, c.category, c.rating, c.price, c.discount, c.expires_at, c.posted_at 
+	query := `SELECT c.id, c.url, c.title, c.description, c.category, c.rating, c.price, c.discount, c.expires_at, c.posted_at, c.quality_score, c.student_count 
 			  FROM courses c
 			  INNER JOIN wishlist w ON c.id = w.course_id
 			  WHERE w.user_id = ?
@@ -420,7 +488,7 @@ func (b *Bot) getUserWishlist(userID int64) ([]database.Course, error) {
 		var course database.Course
 		err := rows.Scan(&course.ID, &course.URL, &course.Title, &course.Description,
 			&course.Category, &course.Rating, &course.Price, &course.Discount,
-			&course.ExpiresAt, &course.PostedAt)
+			&course.ExpiresAt, &course.PostedAt, &course.QualityScore, &course.StudentCount)
 		if err != nil {
 			log.Printf("Failed to scan course: %v", err)
 			continue

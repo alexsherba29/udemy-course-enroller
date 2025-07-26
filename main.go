@@ -11,6 +11,7 @@ import (
 	"udemy-course-notifier/database"
 	"udemy-course-notifier/logger"
 	"udemy-course-notifier/scraper"
+	"udemy-course-notifier/similarity"
 	"udemy-course-notifier/telegram"
 )
 
@@ -83,6 +84,10 @@ func startCourseMonitoring(cfg *config.Config, scraper *scraper.Scraper, db *dat
 func scanForCourses(cfg *config.Config, scraper *scraper.Scraper, db *database.DB, bot *telegram.Bot) {
 	log.Println("Scanning for new courses...")
 
+	// Initialize similarity engine
+	similarityEngine := similarity.New(0.85) // 85% similarity threshold
+	var allNewCourses []database.Course
+
 	for _, sourceURL := range cfg.Scraping.SourceURLs {
 		courses, err := scraper.ScrapeCoursesFromURL(sourceURL)
 		if err != nil {
@@ -90,34 +95,45 @@ func scanForCourses(cfg *config.Config, scraper *scraper.Scraper, db *database.D
 			continue
 		}
 
+		// Filter out existing courses
+		var newCourses []database.Course
 		for _, course := range courses {
-			// Check if course already exists (duplicate prevention)
 			exists, err := db.CourseExists(course.URL)
 			if err != nil {
 				log.Printf("Failed to check if course exists: %v", err)
 				continue
 			}
 
-			if exists {
-				continue // Skip duplicate course
+			if !exists {
+				newCourses = append(newCourses, course)
 			}
-
-			// Add course to database
-			if err := db.AddCourse(&course); err != nil {
-				log.Printf("Failed to add course to database: %v", err)
-				continue
-			}
-
-			// Post to Telegram channel
-			if err := bot.PostCourse(&course); err != nil {
-				log.Printf("Failed to post course to Telegram: %v", err)
-			} else {
-				log.Printf("Posted new course: %s", course.Title)
-			}
-
-			// Rate limiting between posts
-			time.Sleep(2 * time.Second)
 		}
+
+		allNewCourses = append(allNewCourses, newCourses...)
+	}
+
+	// Deduplicate courses across all sources
+	log.Printf("Found %d new courses before deduplication", len(allNewCourses))
+	deduplicatedCourses := similarityEngine.DeduplicateCourses(allNewCourses)
+	log.Printf("After deduplication: %d unique courses", len(deduplicatedCourses))
+
+	// Process deduplicated courses
+	for _, course := range deduplicatedCourses {
+		// Add course to database
+		if err := db.AddCourse(&course); err != nil {
+			log.Printf("Failed to add course to database: %v", err)
+			continue
+		}
+
+		// Post to Telegram channel
+		if err := bot.PostCourse(&course); err != nil {
+			log.Printf("Failed to post course to Telegram: %v", err)
+		} else {
+			log.Printf("Posted new course: %s (Quality: %.1f)", course.Title, course.QualityScore)
+		}
+
+		// Rate limiting between posts
+		time.Sleep(2 * time.Second)
 	}
 
 	log.Println("Course scan completed")
